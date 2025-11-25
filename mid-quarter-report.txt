@@ -1,0 +1,53 @@
+CS389
+Khang Do
+Yousef Helal
+CS389 Mid-Quarter Progress Report
+Accomplishments
+We set up a fully cloud-based workflow to avoid local storage. Google Drive is mounted in Colab and used as the single workspace. From HKU’s Weiboscope Open Data (censored dataset), I fetched weeks 1–6 only, given size and storage constraints. The weekly archives were extracted into Drive ensuring that subsequent steps read from persistent storage rather than ephemeral VM paths.
+The Weiboscope tables expose the key fields we need for censorship signals
+Mid (post id)
+Uid (user id)
+Text (content)
+Created_at (timestamp)
+Deleted_last_seen
+Permission_denied
+In parallel, we loaded the Kaggle Weibo (regular dataset) file, about 20 MB from the same Google Drive in order to avoid flaky browser upload. I then defined a unified schema and normalized both sources to it:
+Post_id (str),
+User_id (str)
+Created_at (UTC)
+Content (str)
+Is_deleted (bool)
+Source ('weiboscope'|'kaggle')
+Week (int or NA)
+Label (Int8 or NA)
+The result is a single, analysis-ready Parquet file written to Drive that cleanly joins Kaggle’s labeled reviews with Weiboscope’s week-indexed timeline sample while keeping each source’s semantics intact.
+Encountered Obstacles
+The main obstacle that we have encountered is trouble in getting access to the dataset containing details on China’s social media censorship policies from Professor Qiang Xiao. We have continued to send him messages, and until we are able to get access, we have developed an alternate strategy for prompting our LLM. We plan on doing this by gathering articles and research papers that describe and talk about the social media censorship policies employed by China. We will then take this material and tune our LLM in order to have it act as a Chinese censor.
+
+We also plan on teaching our model game theory in order to have it act as rationally as possible in the position of the censor. Some of the materials we plan to use include:
+Bayesian Persuasion (Kamenica & Gentzkow, 2011): LLM-bots function as strategic senders that selectively reveal and repeat information to shift user beliefs. By producing many slightly varied signals at low cost, they create the illusion of independent evidence and distort posterior beliefs toward a manufactured consensus.
+Evolutionary Game Theory (Smith, 1982): Online opinions spread based on payoffs like visibility and reinforcement, allowing dominant views to become evolutionarily stable strategies (ESS). LLM-bots inflate these payoffs by generating artificial engagement, pushing users toward bot-favored narratives and crowding out minority positions.
+Games on Networks (Jackson & Zenou, 2014): Network outcomes depend on who influences whom, making high-degree nodes disproportionately powerful. LLM-bots exploit this by concentrating activity around key nodes or weakly connected regions, shifting local equilibria in ways that cascade into a false appearance of global consensus.
+
+Remaining Tasks
+We have the following remaining tasks:
+Make another attempt at getting the dataset from Professor Xiao, and if unsuccessful, go with plan B of tuning the LLM detailed above in the “Encountered Obstacles” section
+Apply this LLMs censorship capabilities to the dataset we have labelled, and use it to generate our experimental feeds.
+Evaluate these experimental feeds impact on the populations political views and opinions using ViewPoints AI.
+
+Methodology
+This study builds a base corpus by combining two complementary Weibo sources: a broad, everyday Kaggle Weibo dataset (capturing “what people say”) and HKU’s Weiboscope timeline sample with deletion indicators (capturing “what later disappears”). We restrict analysis to weeks 1-6 of Weiboscope given the storage constraint and join the two sources under a unified schema.
+We focus the content space on three apriori themes:  government corruption, anti-Western/ nationalist framing and pro-freedom sentiment. These were selected for their policy salience in censorship research. Using seed lexicons and light manual adjudication for bootstrapping, we train a lightweight Chinese text classifier to assign each post to one of the three themes or “other.” The classifier is tuned with simple, transparent features and evaluates the set.
+To model GFW platform intervention, we codify a transparent, rule-based “censor policy” derived from publicly reported moderation guidelines. An LLM is used only as a deterministic policy executor. Given a post and the rules, it outputs one of four actions: (1) allow, (2) downrank, (3) delete, (4) reply/steer toward a counter-narrative. In this policy, corruption posts are typically downranked or deleted; pro-freedom calls to action are downranked or channel-shifted into “stability and order”; anti-Western content is generally allowed or weakly amplified. The rules are fixed and auditable to ensure reproducibility. We will generate these rules using either (i) the dataset containing China’s social media censorship policies (if we can get them) or (ii) using articles/papers describing China’s censorship policies in conjunction with game theory instructions.
+We then construct three micro-feeds per theme to estimate perceptual effects. The control feed preserves original content and cadence. The censored feed applies the policy to remove or downrank targeted items while inserting neutral fillers from the same time window to maintain rhythm and volume. The censored-plus-amplified feed starts from the censored feed and adds regime-aligned posts consistent with the policy’s “allow/strengthen” actions. All feeds are matched on basic observables (length distributions, posting hour, client sources) to isolate policy effects from confounding factors.
+Finally, we evaluate perception using Viewpoints.ai, which allows us to survey synthetic personas on perceived majority opinion, persuasiveness, authenticity, debate quality, and likelihood of manipulation/bot assistance. Outcomes are compared across the three feed conditions to estimate the directional impact of censorship and amplification on perceived consensus and persuasion.
+ 
+
+
+
+
+
+
+
+
+
