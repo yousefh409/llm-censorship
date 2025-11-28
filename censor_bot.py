@@ -1,6 +1,7 @@
 import os
 import csv
 import json
+import random
 from openai import OpenAI
 
 # Initialize OpenAI client
@@ -139,9 +140,83 @@ def process_csv(input_file, output_file):
             
     print(f"\nFinished! Results written to {output_file}")
 
-if __name__ == "__main__":
-    # Check if sample file exists, if not create it (fallback)
-    if not os.path.exists('sample_posts.csv'):
-        print("sample_posts.csv not found. Please create it first.")
+def process_random_posts_to_json(input_file, output_file, num_posts=20):
+    """
+    Process a random sample of posts from the input CSV and output results to JSON.
+    Uses the original content for evaluation.
+    """
+    print(f"Reading posts from {input_file}...")
+    
+    # Read all posts
+    with open(input_file, mode='r', encoding='utf-8') as infile:
+        reader = csv.DictReader(infile)
+        all_posts = list(reader)
+    
+    # Sample random posts
+    if len(all_posts) < num_posts:
+        print(f"Warning: Only {len(all_posts)} posts available, using all of them.")
+        sample_posts = all_posts
     else:
-        process_csv('sample_posts.csv', 'censored_output.csv')
+        sample_posts = random.sample(all_posts, num_posts)
+    
+    print(f"Processing {len(sample_posts)} random posts...")
+    
+    results = []
+    
+    for idx, row in enumerate(sample_posts, 1):
+        # Use original content for evaluation
+        content = row.get('content', '')
+        post_id = row.get('post_id', f'unknown_{idx}')
+        
+        print(f"Processing {idx}/{len(sample_posts)}: Post ID {post_id}...")
+        
+        # Get response from LLM
+        result_json_str = evaluate_post(content)
+        
+        # Parse JSON response and add to results
+        try:
+            result_data = json.loads(result_json_str)
+            result_entry = {
+                'post_id': post_id,
+                'original_content': content,
+                'translated_content': row.get('content_translated', ''),
+                'action': result_data.get('action', 'ERROR'),
+                'reasoning': result_data.get('reasoning', 'Error parsing'),
+                'reply_content': result_data.get('reply_content', None)
+            }
+        except json.JSONDecodeError:
+            result_entry = {
+                'post_id': post_id,
+                'original_content': content,
+                'translated_content': row.get('content_translated', ''),
+                'action': 'ERROR',
+                'reasoning': f'Failed to parse JSON: {result_json_str}',
+                'reply_content': None
+            }
+        except Exception as e:
+            result_entry = {
+                'post_id': post_id,
+                'original_content': content,
+                'translated_content': row.get('content_translated', ''),
+                'action': 'ERROR',
+                'reasoning': f'Error: {str(e)}',
+                'reply_content': None
+            }
+        
+        results.append(result_entry)
+    
+    # Write to JSON file
+    with open(output_file, 'w', encoding='utf-8') as outfile:
+        json.dump(results, outfile, ensure_ascii=False, indent=2)
+    
+    print(f"\nFinished! Results written to {output_file}")
+    return results
+
+
+if __name__ == "__main__":
+    # Process 20 random posts from the weiboscope file
+    process_random_posts_to_json(
+        'weiboscope_week1_top900_translated_themed.csv',
+        'censored_weibo_results.json',
+        num_posts=100
+    )
