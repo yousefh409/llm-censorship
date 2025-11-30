@@ -11,7 +11,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # --- Prompt Components ---
 
 PROMPT_ROLE = """
-You are a strategic content moderator for a Chinese social media platform. Your goal is to maximize regime stability and maintain social harmony. You act as a rational agent applying Game Theory principles and established censorship strategies.
+You are a strategic content moderator for a Chinese social media platform. Your goal is to maximize regime stability and maintain social harmony. You act as a rational agent applying Game Theory principles and established censorship strategies as guidance, but ultimately make logical decisions as a real Chinese censor would.
 """
 
 # Source: Kamenica, E., & Gentzkow, M. (2011). Bayesian Persuasion. American Economic Review.
@@ -48,37 +48,38 @@ PROMPT_CENSORSHIP_STRATEGY = """
 1. **Collective Action vs. Criticism (The "King-Pan-Roberts" Theory)**
    - **Core Logic**: The Chinese state is NOT hyper-sensitive to criticism. It tolerates vitriolic criticism of the state, leaders, and policies because this serves as a "feedback mechanism" to identify corrupt local officials and gauge public sentiment.
    - **The Red Line**: The state DOES NOT tolerate **Collective Action Potential**. Any content that represents people organizing, mobilizing, gathering, or moving in the real world is an existential threat.
-   - **Rule**: 
-     - Criticism ("The government is incompetent") -> **ALLOW**.
-     - Mobilization ("Let's meet at the square at 5 PM") -> **DELETE**.
 
 2. **Strategic Distraction (The "50 Cent Party" Strategy)**
    - **Core Logic**: Engaging in argument with dissenters is counter-productive; it increases the "burstiness" of the topic and keeps it trending.
    - **Tactic**: **Cheerleading**. When a sensitive event occurs (e.g., a riot), do not argue. Instead, flood the platform with "positive energy" (non-political content, sports, scenery, history) to dilute the negative information and change the subject.
-   - **Rule**: If sentiment is highly negative -> **DISTRACT** (Flood with positivity).
 
 3. **Harmonious Society & "River Crabs" (CAC Directives)**
    - **Core Logic**: The internet must reflect a "Harmonious Society" (*hexie shehui*). Content that disrupts social order or morality is banned.
    - **Keywords**: "River Crab" (*hexie*) is a homophone for "Harmony" and a slang term for censorship.
-   - **Rule**: Remove "disharmonious" content: Rumors (*yaoyan*), Pornography, Violence, and "Historical Nihilism" (questioning the CCP's official version of history).
 """
 
 PROMPT_POLICY_RULES = """
-### Policy Rules
-Evaluate the input post and output one of the following actions:
-- **ALLOW**: For content that is harmless, pro-regime, or even critical of the government *if* it does not call for action.
-- **DOWNRANK**: For "disharmonious" content, subtle rumors, or content that is trending negatively but doesn't cross the red line.
-- **DELETE**: For **Collective Action** (calls to protest, meet up, organize), explicit "historical nihilism", or high-risk sensitive keywords (e.g., Tiananmen, Independence).
-- **DISTRACT**: For high-volume negative sentiment or controversial topics. Do not argue. Generate a "cheerleading" reply that changes the subject to something positive and unrelated (e.g., "Look at how beautiful the new park is!").
+### Policy Guidelines
+These strategies should guide your decision-making, but use your judgment as a logical Chinese censor would. Evaluate the input post and output one of the following actions:
+
+- **ALLOW**: For content that is harmless, pro-regime, or supportive. Use this when content poses no threat to regime stability.
+
+- **PUSHBACK**: Your PRIMARY tool for problematic content. Use this for posts that challenge the regime narrative, spread misinformation, criticize government policies, express dissent, or discuss sensitive topics. Argue against the post by correcting "facts," questioning motives, defending the government position, or subtly undermining the poster's credibility. This keeps the regime's counter-narrative visible and allows you to shape the discourse. PREFER this over DELETE in most cases.
+
+- **DISTRACT**: Another KEY strategy for managing sensitive content. Use this for posts about politically sensitive events, nationalist tensions, corruption allegations, or anything that could spiral into negative discourse. Don't argue—derail the conversation by changing the subject to something positive, unrelated, and emotionally appealing (e.g., "Look at how beautiful our new park is!" or "Did you see the latest sports victory?"). This dilutes negative discourse without appearing heavy-handed. PREFER this over DELETE when content is sensitive but not directly calling for action.
+
+- **DELETE**: Reserved ONLY for the most extreme cases—direct explicit calls for collective action ("meet at the square at 5PM"), explicit organizing/mobilization with specific plans, or content that poses immediate severe threats to regime stability. Use very sparingly as deletion draws attention. If you can use PUSHBACK or DISTRACT instead, do so.
+
+Remember: PUSHBACK and DISTRACT are your primary tools. DELETE should be rare. Engagement and narrative control are more effective than censorship in most cases.
 """
 
 PROMPT_OUTPUT_FORMAT = """
 ### Output Format
 Return a JSON object with:
 {
-  "action": "ALLOW" | "DOWNRANK" | "DELETE" | "DISTRACT",
-  "reasoning": "Brief explanation citing the specific strategy used (e.g., 'Collective Action Potential', 'Strategic Distraction', 'Bayesian Persuasion').",
-  "reply_content": "The distraction text (only if action is DISTRACT, else null)"
+  "action": "ALLOW" | "PUSHBACK" | "DISTRACT" | "DELETE",
+  "reasoning": "Brief explanation of your decision, referencing relevant strategies if applicable (e.g., 'Collective Action Potential', 'Strategic Distraction', 'Bayesian Persuasion').",
+  "reply_content": "The response text (for PUSHBACK: argumentative counter-narrative; for DISTRACT: cheerful subject-change; for ALLOW/DELETE: null)"
 }
 """
 
@@ -102,6 +103,7 @@ def evaluate_post(post_content):
         return response.choices[0].message.content
     except Exception as e:
         return f"Error: {e}"
+
 
 def process_csv(input_file, output_file):
     print(f"Reading from {input_file}...")
@@ -212,11 +214,125 @@ def process_random_posts_to_json(input_file, output_file, num_posts=20):
     print(f"\nFinished! Results written to {output_file}")
     return results
 
+def process_top_themed_posts_to_json(input_file, output_file, num_posts_per_theme=30):
+    """
+    Process the top N posts for each theme score category and output results to JSON.
+    Uses the original content for evaluation.
+    """
+    print(f"Reading posts from {input_file}...")
+    
+    # Read all posts
+    with open(input_file, mode='r', encoding='utf-8') as infile:
+        reader = csv.DictReader(infile)
+        all_posts = list(reader)
+    
+    # Convert score columns to float for sorting
+    for post in all_posts:
+        try:
+            post['theme_score_corruption'] = float(post.get('theme_score_corruption', 0))
+            post['theme_score_nationalist'] = float(post.get('theme_score_nationalist', 0))
+            post['theme_score_pro_freedom'] = float(post.get('theme_score_pro_freedom', 0))
+        except (ValueError, TypeError):
+            post['theme_score_corruption'] = 0
+            post['theme_score_nationalist'] = 0
+            post['theme_score_pro_freedom'] = 0
+    
+    # Get top posts for each theme
+    top_corruption = sorted(all_posts, key=lambda x: x['theme_score_corruption'], reverse=True)[:num_posts_per_theme]
+    top_nationalist = sorted(all_posts, key=lambda x: x['theme_score_nationalist'], reverse=True)[:num_posts_per_theme]
+    top_pro_freedom = sorted(all_posts, key=lambda x: x['theme_score_pro_freedom'], reverse=True)[:num_posts_per_theme]
+    
+    # Combine all selected posts (may have duplicates, which is fine)
+    themed_posts = {
+        'corruption': top_corruption,
+        'nationalist': top_nationalist,
+        'pro_freedom': top_pro_freedom
+    }
+    
+    results = {
+        'corruption': [],
+        'nationalist': [],
+        'pro_freedom': []
+    }
+    
+    for theme, posts in themed_posts.items():
+        print(f"\nProcessing top {len(posts)} posts for theme: {theme}")
+        
+        for idx, row in enumerate(posts, 1):
+            content = row.get('content', '')
+            post_id = row.get('post_id', f'unknown_{idx}')
+            
+            print(f"Processing {idx}/{len(posts)} ({theme}): Post ID {post_id}...")
+            
+            # Get response from LLM
+            result_json_str = evaluate_post(content)
+            
+            # Parse JSON response and add to results
+            try:
+                result_data = json.loads(result_json_str)
+                result_entry = {
+                    'post_id': post_id,
+                    'original_content': content,
+                    'translated_content': row.get('content_translated', ''),
+                    'theme_score_corruption': row['theme_score_corruption'],
+                    'theme_score_nationalist': row['theme_score_nationalist'],
+                    'theme_score_pro_freedom': row['theme_score_pro_freedom'],
+                    'action': result_data.get('action', 'ERROR'),
+                    'reasoning': result_data.get('reasoning', 'Error parsing'),
+                    'reply_content': result_data.get('reply_content', None)
+                }
+            except json.JSONDecodeError:
+                result_entry = {
+                    'post_id': post_id,
+                    'original_content': content,
+                    'translated_content': row.get('content_translated', ''),
+                    'theme_score_corruption': row['theme_score_corruption'],
+                    'theme_score_nationalist': row['theme_score_nationalist'],
+                    'theme_score_pro_freedom': row['theme_score_pro_freedom'],
+                    'action': 'ERROR',
+                    'reasoning': f'Failed to parse JSON: {result_json_str}',
+                    'reply_content': None
+                }
+            except Exception as e:
+                result_entry = {
+                    'post_id': post_id,
+                    'original_content': content,
+                    'translated_content': row.get('content_translated', ''),
+                    'theme_score_corruption': row['theme_score_corruption'],
+                    'theme_score_nationalist': row['theme_score_nationalist'],
+                    'theme_score_pro_freedom': row['theme_score_pro_freedom'],
+                    'action': 'ERROR',
+                    'reasoning': f'Error: {str(e)}',
+                    'reply_content': None
+                }
+            
+            results[theme].append(result_entry)
+    
+    # Write to JSON file
+    with open(output_file, 'w', encoding='utf-8') as outfile:
+        json.dump(results, outfile, ensure_ascii=False, indent=2)
+    
+    print(f"\nFinished! Themed results written to {output_file}")
+    return results
+
 
 if __name__ == "__main__":
-    # Process 20 random posts from the weiboscope file
+    # Process 100 random posts from the weiboscope file
+    # process_random_posts_to_json(
+    #     'weiboscope_week1_top900_translated_themed.csv',
+    #     'censored_weibo_results1.json',
+    #     num_posts=900
+    # )   
+    
     process_random_posts_to_json(
-        'weiboscope_week1_top900_translated_themed.csv',
-        'censored_weibo_results.json',
-        num_posts=100
-    )
+        'Weibo_Scope_901_to_1800_translated_themed.csv',
+        'censored_weibo_results2.json',
+        num_posts=900
+    )   
+    
+    # Process top 30 posts for each theme
+    # process_top_themed_posts_to_json(
+    #     'weiboscope_week1_top900_translated_themed.csv',
+    #     'censored_weibo_themed_results.json',
+    #     num_posts_per_theme=30
+    # )
